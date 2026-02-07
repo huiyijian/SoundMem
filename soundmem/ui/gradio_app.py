@@ -111,10 +111,16 @@ class SoundMemApp:
             return f"❌ 停止录音失败: {str(e)}", self.transcription_text
     
     def _process_audio_loop(self):
-        """音频处理循环（在独立线程中运行）"""
+        """音频处理循环（在独立线程中运行）- 改进版：基于VAD的动态缓冲"""
         audio_buffer = []
         buffer_duration = 0
-        target_duration = self.config.chunk_duration
+        silence_duration = 0
+        
+        # 动态参数
+        min_duration = 1.0      # 最小1秒（更快响应）
+        max_duration = 10.0     # 最大10秒
+        silence_threshold = 0.8  # 静音0.8秒触发识别
+        energy_threshold = 0.01  # 语音能量阈值
         
         while not self.stop_processing:
             # 获取音频块
@@ -125,10 +131,36 @@ class SoundMemApp:
             
             # 添加到缓冲区
             audio_buffer.append(audio_chunk)
-            buffer_duration += len(audio_chunk) / self.config.sample_rate
+            chunk_duration = len(audio_chunk) / self.config.sample_rate
+            buffer_duration += chunk_duration
             
-            # 当缓冲区达到目标时长时，进行处理
-            if buffer_duration >= target_duration:
+            # 简单的能量检测（代替VAD）
+            energy = np.sqrt(np.mean(audio_chunk ** 2))
+            is_speech = energy > energy_threshold
+            
+            if not is_speech:
+                silence_duration += chunk_duration
+            else:
+                silence_duration = 0
+            
+            # 决定是否处理
+            should_process = False
+            reason = ""
+            
+            if buffer_duration >= max_duration:
+                # 达到最大时长，强制处理
+                should_process = True
+                reason = f"达到最大时长 {max_duration}s"
+                
+            elif buffer_duration >= min_duration and silence_duration >= silence_threshold:
+                # 达到最小时长且检测到静音
+                should_process = True
+                reason = f"检测到静音 {silence_duration:.2f}s"
+            
+            # 当缓冲区达到处理条件时，进行处理
+            if should_process and audio_buffer:
+                log.info(f"{reason}，开始识别（缓冲时长: {buffer_duration:.2f}s）")
+                
                 # 合并音频
                 audio_data = np.concatenate(audio_buffer, axis=0)
                 
@@ -156,6 +188,7 @@ class SoundMemApp:
                 # 清空缓冲区
                 audio_buffer = []
                 buffer_duration = 0
+                silence_duration = 0
     
     def chat(self, message, history, api_key, base_url, model_name):
         """聊天功能"""

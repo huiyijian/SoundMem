@@ -36,3 +36,4 @@ echo "2. 激活环境: conda activate soundmem"
 echo "3. 运行程序: python main.py"
 echo ""
 
+

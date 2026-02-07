@@ -126,3 +126,4 @@ class AudioRecorder:
         if self.is_recording:
             self.stop_recording()
 
+

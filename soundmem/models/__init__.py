@@ -18,3 +18,4 @@ class ModelLoader:
         
         log.info("模型下载完成")
 
+
