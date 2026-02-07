@@ -5,7 +5,6 @@
 
 from typing import List, Dict, Any, Optional
 import chromadb
-from chromadb.config import Settings
 from sentence_transformers import SentenceTransformer
 from soundmem.utils.logger import log
 
@@ -48,11 +47,7 @@ class VectorStore:
         try:
             # 创建ChromaDB客户端
             self.client = chromadb.PersistentClient(
-                path=self.db_path,
-                settings=Settings(
-                    anonymized_telemetry=False,
-                    allow_reset=True
-                )
+                path=self.db_path
             )
             
             # 获取或创建集合
