@@ -18,7 +18,8 @@ torch==2.1.2
 transformers==4.36.2
 
 # LLM API调用
-openai==1.12.0
+openai==1.54.0
+httpx==0.27.2
 
 # Web界面
 gradio==4.16.0

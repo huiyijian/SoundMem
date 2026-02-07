@@ -102,15 +102,22 @@ class RAGEngine:
 请基于上述录音内容回答用户的问题。"""
             
             # 调用LLM
-            response = self.client.chat.completions.create(
-                model=self.model_name,
-                messages=[
+            # 构建API调用参数
+            api_params = {
+                "model": self.model_name,
+                "messages": [
                     {"role": "system", "content": self.system_prompt},
                     {"role": "user", "content": user_message}
                 ],
-                temperature=temperature,
-                max_tokens=max_tokens
-            )
+                "temperature": temperature,
+                "max_tokens": max_tokens
+            }
+            
+            # 通义千问API需要禁用enable_thinking（非流式调用）
+            if "qwen" in self.model_name.lower() or "dashscope" in str(self.client.base_url).lower():
+                api_params["extra_body"] = {"enable_thinking": False}
+            
+            response = self.client.chat.completions.create(**api_params)
             
             answer = response.choices[0].message.content
             
@@ -159,16 +166,23 @@ class RAGEngine:
 请基于上述录音内容回答用户的问题。"""
             
             # 调用LLM流式接口
-            stream = self.client.chat.completions.create(
-                model=self.model_name,
-                messages=[
+            # 构建API调用参数
+            api_params = {
+                "model": self.model_name,
+                "messages": [
                     {"role": "system", "content": self.system_prompt},
                     {"role": "user", "content": user_message}
                 ],
-                temperature=temperature,
-                max_tokens=max_tokens,
-                stream=True
-            )
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "stream": True
+            }
+            
+            # 通义千问API的流式调用可以启用enable_thinking
+            if "qwen" in self.model_name.lower() or "dashscope" in str(self.client.base_url).lower():
+                api_params["extra_body"] = {"enable_thinking": True}
+            
+            stream = self.client.chat.completions.create(**api_params)
             
             for chunk in stream:
                 if chunk.choices[0].delta.content:
