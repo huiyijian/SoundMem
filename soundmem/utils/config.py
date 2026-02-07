@@ -14,7 +14,11 @@ load_dotenv()
 class Config(BaseModel):
     """配置类"""
     
-    model_config = {"protected_namespaces": ()}  # 允许使用model_开头的字段名
+    model_config = {
+        "protected_namespaces": (),  # 允许使用model_开头的字段名
+        "env_file": ".env",
+        "env_file_encoding": "utf-8"
+    }
     
     # API配置
     openai_api_key: str = Field(default="", description="OpenAI API Key")
@@ -39,10 +43,6 @@ class Config(BaseModel):
     # 日志配置
     log_level: str = Field(default="INFO", description="日志级别")
     log_path: str = Field(default="./logs", description="日志路径")
-    
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
 
 def load_config() -> Config:
     """加载配置"""
