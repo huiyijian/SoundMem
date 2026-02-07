@@ -121,6 +121,8 @@ class SoundMemApp:
         # 简化策略：只设置最小缓冲时长，让FunASR的VAD处理所有分段逻辑
         min_duration = 5.0  # 至少累积5秒再发送给ASR
         
+        log.info(f"音频处理循环启动，最小缓冲时长: {min_duration}秒")
+        
         while not self.stop_processing:
             # 获取音频块
             audio_chunk = self.recorder.get_audio_chunk(timeout=0.5)
@@ -132,6 +134,10 @@ class SoundMemApp:
             audio_buffer.append(audio_chunk)
             chunk_duration = len(audio_chunk) / self.config.sample_rate
             buffer_duration += chunk_duration
+            
+            # 每秒输出一次调试信息
+            if int(buffer_duration) % 1 == 0 and buffer_duration > 0:
+                log.debug(f"当前缓冲时长: {buffer_duration:.2f}s")
             
             # 简单策略：达到最小时长就发送给ASR
             # FunASR的VAD会自动处理分段、标点等所有逻辑
@@ -165,10 +171,14 @@ class SoundMemApp:
                         self.vector_store.add_texts(texts, metadatas)
                         
                         log.info(f"已添加 {len(chunks)} 个文本块到向量库")
+                else:
+                    log.warning(f"ASR识别失败或无文本: success={result['success']}, text='{result.get('text', '')}'")
                 
                 # 清空缓冲区
                 audio_buffer = []
                 buffer_duration = 0
+        
+        log.info("音频处理循环结束")
     
     def chat(self, message, history, api_key, base_url, model_name):
         """聊天功能"""
