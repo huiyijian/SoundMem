@@ -111,15 +111,14 @@ class SoundMemApp:
             return f"❌ 停止录音失败: {str(e)}", self.transcription_text
     
     def _process_audio_loop(self):
-        """音频处理循环（在独立线程中运行）- 改进版：基于VAD的动态缓冲"""
+        """音频处理循环（在独立线程中运行）- 让FunASR的VAD自动处理分段"""
         audio_buffer = []
         buffer_duration = 0
         silence_duration = 0
         
-        # 动态参数
-        min_duration = 1.0      # 最小1秒（更快响应）
-        max_duration = 10.0     # 最大10秒
-        silence_threshold = 0.8  # 静音0.8秒触发识别
+        # 简化的参数 - 只用于决定何时发送给ASR
+        min_duration = 2.0       # 最小2秒再发送给ASR
+        silence_threshold = 1.0  # 静音1秒触发
         energy_threshold = 0.01  # 语音能量阈值
         
         while not self.stop_processing:
@@ -134,7 +133,7 @@ class SoundMemApp:
             chunk_duration = len(audio_chunk) / self.config.sample_rate
             buffer_duration += chunk_duration
             
-            # 简单的能量检测（代替VAD）
+            # 简单的能量检测
             energy = np.sqrt(np.mean(audio_chunk ** 2))
             is_speech = energy > energy_threshold
             
@@ -143,28 +142,19 @@ class SoundMemApp:
             else:
                 silence_duration = 0
             
-            # 决定是否处理
-            should_process = False
-            reason = ""
+            # 决定是否发送给ASR处理
+            # 策略：达到最小时长 且 检测到静音
+            should_process = (buffer_duration >= min_duration and 
+                            silence_duration >= silence_threshold)
             
-            if buffer_duration >= max_duration:
-                # 达到最大时长，强制处理
-                should_process = True
-                reason = f"达到最大时长 {max_duration}s"
-                
-            elif buffer_duration >= min_duration and silence_duration >= silence_threshold:
-                # 达到最小时长且检测到静音
-                should_process = True
-                reason = f"检测到静音 {silence_duration:.2f}s"
-            
-            # 当缓冲区达到处理条件时，进行处理
+            # 当满足条件时，发送给ASR（FunASR会自动用VAD分段和添加标点）
             if should_process and audio_buffer:
-                log.info(f"{reason}，开始识别（缓冲时长: {buffer_duration:.2f}s）")
+                log.info(f"检测到静音 {silence_duration:.2f}s，发送 {buffer_duration:.2f}s 音频给ASR处理")
                 
                 # 合并音频
                 audio_data = np.concatenate(audio_buffer, axis=0)
                 
-                # ASR转写
+                # ASR转写 - FunASR会自动使用VAD分段和标点恢复
                 result = self.asr_engine.transcribe(audio_data, self.config.sample_rate)
                 
                 if result['success'] and result['text']:
@@ -173,6 +163,10 @@ class SoundMemApp:
                     
                     # 更新转写文本
                     self.transcription_text += f"[{timestamp}] {text}\n\n"
+                    
+                    # 如果有分段信息，也可以显示
+                    if 'segments' in result and result['segments']:
+                        log.info(f"FunASR返回了 {len(result['segments'])} 个分段")
                     
                     # 文本分块
                     chunks = self.text_processor.chunk_text(text, timestamp)
