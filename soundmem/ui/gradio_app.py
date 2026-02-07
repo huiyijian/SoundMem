@@ -272,8 +272,7 @@ def create_app():
                 
                 chatbot = gr.Chatbot(
                     label="对话历史",
-                    height=400,
-                    placeholder="在下方输入问题，我会基于录音内容回答你..."
+                    height=400
                 )
                 
                 with gr.Row():
