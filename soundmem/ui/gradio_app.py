@@ -113,15 +113,17 @@ class SoundMemApp:
     def _process_audio_loop(self):
         """音频处理循环（在独立线程中运行）
         
-        完全依赖FunASR的专业VAD进行分段和标点恢复
+        优化策略：每10分钟识别一次，最大化上下文
         """
         audio_buffer = []
         buffer_duration = 0
         
-        # 简化策略：只设置最小缓冲时长，让FunASR的VAD处理所有分段逻辑
-        min_duration = 5.0  # 至少累积5秒再发送给ASR
+        # 优化策略：累积10分钟音频再识别，给VAD最大的上下文
+        recognition_interval = 600.0  # 10分钟 = 600秒
         
-        log.info(f"音频处理循环启动，最小缓冲时长: {min_duration}秒")
+        accumulated_text = ""  # 累积的完整文本
+        
+        log.info(f"音频处理循环启动，识别间隔: {recognition_interval/60:.0f}分钟")
         
         while not self.stop_processing:
             # 获取音频块
@@ -135,48 +137,91 @@ class SoundMemApp:
             chunk_duration = len(audio_chunk) / self.config.sample_rate
             buffer_duration += chunk_duration
             
-            # 每秒输出一次调试信息
-            if int(buffer_duration) % 1 == 0 and buffer_duration > 0:
-                log.debug(f"当前缓冲时长: {buffer_duration:.2f}s")
+            # 每分钟输出一次进度
+            if int(buffer_duration) % 60 == 0 and buffer_duration > 0:
+                log.info(f"已录音 {buffer_duration/60:.1f} 分钟，等待识别...")
             
-            # 简单策略：达到最小时长就发送给ASR
-            # FunASR的VAD会自动处理分段、标点等所有逻辑
-            if buffer_duration >= min_duration and audio_buffer:
-                log.info(f"发送 {buffer_duration:.2f}s 音频给FunASR处理")
+            # 达到10分钟才识别
+            if buffer_duration >= recognition_interval and audio_buffer:
+                log.info(f"达到识别间隔，开始识别 {buffer_duration/60:.1f} 分钟的音频")
                 
                 # 合并音频
                 audio_data = np.concatenate(audio_buffer, axis=0)
                 
-                # ASR转写 - FunASR会自动使用VAD分段和标点恢复
+                # 使用批处理识别
                 result = self.asr_engine.transcribe(audio_data, self.config.sample_rate)
                 
                 if result['success'] and result['text']:
-                    text = result['text']
+                    text = result['text'].strip()
+                    
+                    if text:
+                        # 累积文本
+                        if accumulated_text:
+                            accumulated_text += " " + text
+                        else:
+                            accumulated_text = text
+                        
+                        # 更新显示
+                        timestamp = datetime.now().isoformat()
+                        self.transcription_text = f"[{timestamp}] {accumulated_text}\n\n"
+                        
+                        log.info(f"识别到文本长度: {len(text)} 字符")
+                        log.info(f"文本预览: {text[:100]}..." if len(text) > 100 else f"识别到文本: {text}")
+                        
+                        # 如果有分段信息，记录
+                        if 'segments' in result and result['segments']:
+                            log.info(f"FunASR返回了 {len(result['segments'])} 个分段")
+                        
+                        # 立即保存到向量库
+                        chunks = self.text_processor.chunk_text(text, timestamp)
+                        if chunks:
+                            texts = [chunk['text'] for chunk in chunks]
+                            metadatas = [{'timestamp': chunk['timestamp']} for chunk in chunks]
+                            self.vector_store.add_texts(texts, metadatas)
+                            log.info(f"已保存 {len(chunks)} 个文本块到向量库")
+                else:
+                    log.warning(f"识别失败或无文本: success={result['success']}")
+                
+                # 清空缓冲区，开始下一个10分钟
+                audio_buffer = []
+                buffer_duration = 0
+        
+        # 停止录音时：处理剩余的所有音频
+        if audio_buffer and buffer_duration > 0:
+            log.info(f"停止录音，处理剩余 {buffer_duration:.1f} 秒的音频")
+            
+            # 合并所有剩余音频
+            audio_data = np.concatenate(audio_buffer, axis=0)
+            
+            # 识别剩余音频
+            result = self.asr_engine.transcribe(audio_data, self.config.sample_rate)
+            
+            if result['success'] and result['text']:
+                text = result['text'].strip()
+                if text:
+                    # 累积到总文本
+                    if accumulated_text:
+                        accumulated_text += " " + text
+                    else:
+                        accumulated_text = text
+                    
+                    log.info(f"剩余音频识别完成，文本长度: {len(text)} 字符")
+                    log.info(f"文本预览: {text[:100]}..." if len(text) > 100 else f"识别到文本: {text}")
+                    
+                    # 保存到向量库
                     timestamp = datetime.now().isoformat()
-                    
-                    # 更新转写文本
-                    self.transcription_text += f"[{timestamp}] {text}\n\n"
-                    
-                    # 如果有分段信息，记录日志
-                    if 'segments' in result and result['segments']:
-                        log.info(f"FunASR返回了 {len(result['segments'])} 个分段")
-                    
-                    # 文本分块
                     chunks = self.text_processor.chunk_text(text, timestamp)
-                    
-                    # 添加到向量库
                     if chunks:
                         texts = [chunk['text'] for chunk in chunks]
                         metadatas = [{'timestamp': chunk['timestamp']} for chunk in chunks]
                         self.vector_store.add_texts(texts, metadatas)
-                        
-                        log.info(f"已添加 {len(chunks)} 个文本块到向量库")
-                else:
-                    log.warning(f"ASR识别失败或无文本: success={result['success']}, text='{result.get('text', '')}'")
-                
-                # 清空缓冲区
-                audio_buffer = []
-                buffer_duration = 0
+                        log.info(f"已保存剩余 {len(chunks)} 个文本块到向量库")
+        
+        # 更新最终显示
+        if accumulated_text:
+            timestamp = datetime.now().isoformat()
+            self.transcription_text = f"[{timestamp}] {accumulated_text}\n\n"
+            log.info(f"录音结束，总文本长度: {len(accumulated_text)} 字符")
         
         log.info("音频处理循环结束")
     
@@ -214,18 +259,6 @@ class SoundMemApp:
         history.append((message, answer))
         
         return history, ""
-    
-    def get_audio_devices(self):
-        """获取可用的音频设备列表"""
-        try:
-            devices = self.recorder.list_devices()
-            device_list = []
-            for i, device in enumerate(devices):
-                if device['max_input_channels'] > 0:  # 只显示输入设备
-                    device_list.append(f"[{i}] {device['name']}")
-            return "\n".join(device_list) if device_list else "未找到音频输入设备"
-        except Exception as e:
-            return f"获取设备列表失败: {str(e)}"
     
     def get_stats(self):
         """获取统计信息"""
@@ -271,21 +304,6 @@ def create_app():
                     stop_btn = gr.Button("⏹️ 停止录音", variant="stop")
                 
                 status_text = gr.Textbox(label="录音状态", interactive=False)
-                
-                # 音频设备信息
-                with gr.Accordion("🎤 音频设备信息", open=False):
-                    devices_text = gr.Textbox(
-                        label="可用的录音设备",
-                        lines=5,
-                        interactive=False
-                    )
-                    list_devices_btn = gr.Button("🔍 列出设备")
-                    gr.Markdown("""
-                    **提示**：
-                    - 如果要录制电脑声音，需要启用"立体声混音"
-                    - Windows: 声音设置 → 录制 → 显示已禁用的设备 → 启用立体声混音
-                    - 默认使用系统默认录音设备
-                    """)
                 
                 transcription = gr.Textbox(
                     label="实时转写文本",
@@ -342,11 +360,6 @@ def create_app():
         stop_btn.click(
             app.stop_recording,
             outputs=[status_text, transcription]
-        )
-        
-        list_devices_btn.click(
-            app.get_audio_devices,
-            outputs=devices_text
         )
         
         refresh_btn.click(
