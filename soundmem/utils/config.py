@@ -14,6 +14,8 @@ load_dotenv()
 class Config(BaseModel):
     """配置类"""
     
+    model_config = {"protected_namespaces": ()}  # 允许使用model_开头的字段名
+    
     # API配置
     openai_api_key: str = Field(default="", description="OpenAI API Key")
     openai_base_url: str = Field(default="https://api.openai.com/v1", description="API Base URL")
