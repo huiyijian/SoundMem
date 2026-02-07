@@ -65,9 +65,11 @@ class ASREngine:
             if len(audio_data.shape) > 1:
                 audio_data = audio_data.flatten()
             
-            # 转换为int16格式
-            if audio_data.dtype == np.float32 or audio_data.dtype == np.float64:
-                audio_data = (audio_data * 32767).astype(np.int16)
+            # 确保音频数据是float32格式（FunASR要求）
+            if audio_data.dtype == np.int16:
+                audio_data = audio_data.astype(np.float32) / 32767.0
+            elif audio_data.dtype != np.float32:
+                audio_data = audio_data.astype(np.float32)
             
             # 进行识别
             result = self.model.generate(
