@@ -113,23 +113,13 @@ class SoundMemApp:
     def _process_audio_loop(self):
         """音频处理循环（在独立线程中运行）
         
-        双层检测机制：
-        1. 简单能量检测：决定何时发送给ASR（粗过滤）
-        2. FunASR的VAD：精确分段和标点恢复（精处理）
+        完全依赖FunASR的专业VAD进行分段和标点恢复
         """
         audio_buffer = []
         buffer_duration = 0
-        silence_duration = 0
         
-        # 可调参数
-        min_duration = 2.0       # 最小2秒再发送给ASR
-        silence_threshold = 1.0  # 静音1秒触发
-        energy_threshold = 0.01  # 语音能量阈值（可根据环境调整）
-        
-        # 如果想完全依赖FunASR的VAD，可以设置：
-        # energy_threshold = 0.0  # 禁用能量检测
-        # silence_threshold = 0.0  # 禁用静音检测
-        # 这样就只按 min_duration 定时发送
+        # 简化策略：只设置最小缓冲时长，让FunASR的VAD处理所有分段逻辑
+        min_duration = 5.0  # 至少累积5秒再发送给ASR
         
         while not self.stop_processing:
             # 获取音频块
@@ -143,27 +133,10 @@ class SoundMemApp:
             chunk_duration = len(audio_chunk) / self.config.sample_rate
             buffer_duration += chunk_duration
             
-            # 简单的能量检测（第一层过滤）
-            if energy_threshold > 0:
-                energy = np.sqrt(np.mean(audio_chunk ** 2))
-                is_speech = energy > energy_threshold
-                
-                if not is_speech:
-                    silence_duration += chunk_duration
-                else:
-                    silence_duration = 0
-            else:
-                # 禁用能量检测时，认为一直有语音
-                silence_duration = 0
-            
-            # 决定是否发送给ASR处理
-            # 策略：达到最小时长 且 检测到静音（或禁用了静音检测）
-            should_process = (buffer_duration >= min_duration and 
-                            (silence_threshold == 0 or silence_duration >= silence_threshold))
-            
-            # 当满足条件时，发送给ASR（FunASR会自动用VAD分段和添加标点）
-            if should_process and audio_buffer:
-                log.info(f"发送 {buffer_duration:.2f}s 音频给ASR处理（静音: {silence_duration:.2f}s）")
+            # 简单策略：达到最小时长就发送给ASR
+            # FunASR的VAD会自动处理分段、标点等所有逻辑
+            if buffer_duration >= min_duration and audio_buffer:
+                log.info(f"发送 {buffer_duration:.2f}s 音频给FunASR处理")
                 
                 # 合并音频
                 audio_data = np.concatenate(audio_buffer, axis=0)
@@ -178,7 +151,7 @@ class SoundMemApp:
                     # 更新转写文本
                     self.transcription_text += f"[{timestamp}] {text}\n\n"
                     
-                    # 如果有分段信息，也可以显示
+                    # 如果有分段信息，记录日志
                     if 'segments' in result and result['segments']:
                         log.info(f"FunASR返回了 {len(result['segments'])} 个分段")
                     
@@ -196,7 +169,6 @@ class SoundMemApp:
                 # 清空缓冲区
                 audio_buffer = []
                 buffer_duration = 0
-                silence_duration = 0
     
     def chat(self, message, history, api_key, base_url, model_name):
         """聊天功能"""
