@@ -215,6 +215,18 @@ class SoundMemApp:
         
         return history, ""
     
+    def get_audio_devices(self):
+        """获取可用的音频设备列表"""
+        try:
+            devices = self.recorder.list_devices()
+            device_list = []
+            for i, device in enumerate(devices):
+                if device['max_input_channels'] > 0:  # 只显示输入设备
+                    device_list.append(f"[{i}] {device['name']}")
+            return "\n".join(device_list) if device_list else "未找到音频输入设备"
+        except Exception as e:
+            return f"获取设备列表失败: {str(e)}"
+    
     def get_stats(self):
         """获取统计信息"""
         doc_count = self.vector_store.get_count()
@@ -259,6 +271,21 @@ def create_app():
                     stop_btn = gr.Button("⏹️ 停止录音", variant="stop")
                 
                 status_text = gr.Textbox(label="录音状态", interactive=False)
+                
+                # 音频设备信息
+                with gr.Accordion("🎤 音频设备信息", open=False):
+                    devices_text = gr.Textbox(
+                        label="可用的录音设备",
+                        lines=5,
+                        interactive=False
+                    )
+                    list_devices_btn = gr.Button("🔍 列出设备")
+                    gr.Markdown("""
+                    **提示**：
+                    - 如果要录制电脑声音，需要启用"立体声混音"
+                    - Windows: 声音设置 → 录制 → 显示已禁用的设备 → 启用立体声混音
+                    - 默认使用系统默认录音设备
+                    """)
                 
                 transcription = gr.Textbox(
                     label="实时转写文本",
@@ -315,6 +342,11 @@ def create_app():
         stop_btn.click(
             app.stop_recording,
             outputs=[status_text, transcription]
+        )
+        
+        list_devices_btn.click(
+            app.get_audio_devices,
+            outputs=devices_text
         )
         
         refresh_btn.click(
